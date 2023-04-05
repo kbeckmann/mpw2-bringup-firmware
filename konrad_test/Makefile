@@ -1,8 +1,9 @@
 # Set the prefix for `riscvXX-unknown-elf-*`
 # On installations using `multilib`, this will be `riscv64` even for compiling to 32-bit targets
+TOOLCHAIN_PATH=/opt/riscv64-unknown-elf-gcc-8.3.0-2019.08.0-x86_64-linux-ubuntu14/bin/
 TOOLCHAIN_PREFIX=riscv64
 #TOOLCHAIN_PREFIX=riscv32
-INCLUDES=-I$(shell pwd) -I../../ -I../../generated/
+INCLUDES=-I$(shell pwd) -Igenerated/ -Ifirmware
 
 VOLTAGE=$(shell python3 -c "from gpio_config_def import voltage; print(voltage)")
 
@@ -12,19 +13,18 @@ VOLTAGE=$(shell python3 -c "from gpio_config_def import voltage; print(voltage)"
 
 PATTERN = konrad_test
 
+all: ${PATTERN}.hex ${PATTERN}.elf ${PATTERN}.bin
+
+# Flashrom requires a binary that's equal to the size of the flash
+flashrom: ${PATTERN}.bin
+	rm -f root.bin && dd if=${PATTERN}.bin of=root.bin && dd if=/dev/zero of=root.bin bs=1 count=1 bs=1M seek=3
+	flashrom -p serprog:dev=/dev/ttyACM0 --layout flashregion.layout --image root.bin -w root.bin -N
+
+
 hex:  ${PATTERN:=.hex}
 
-gpio_config_data.c: gpio_config_def.py gpio_config_io.py
-	python3 ../../gpio_config/gpio_config_builder.py
-
-sim: gpio_config_def.py gpio_config_io.py gpio_config_data.c
-	python3 ../../gpio_config/gpio_config_simulator.py
-
-check: gpio_config_def.py gpio_config_io.py gpio_config_data.c
-	python3 ../../gpio_config/gpio_config_checker.py
-
-%.elf: %.c ../../sections.lds ../../crt0_vex.S gpio_config_data.c
-	$(TOOLCHAIN_PATH)$(TOOLCHAIN_PREFIX)-unknown-elf-gcc $(INCLUDES) -O0 -mabi=ilp32 -march=rv32i -D__vexriscv__ -Wl,-Bstatic,-T,../../sections.lds,--strip-debug -ffreestanding -nostdlib -o $@ ../../crt0_vex.S ../../isr.c $<
+%.elf: %.c sections.lds crt0_vex.S
+	$(TOOLCHAIN_PATH)$(TOOLCHAIN_PREFIX)-unknown-elf-gcc $(INCLUDES) -O0 -mabi=ilp32 -march=rv32i -D__vexriscv__ -Wl,-Bstatic,-T,sections.lds,--strip-debug -ffreestanding -nostdlib -o $@ crt0_vex.S firmware/isr.c $<
 	${TOOLCHAIN_PATH}$(TOOLCHAIN_PREFIX)-unknown-elf-objdump -D $@ > $*.lst
 
 %.hex: %.elf
